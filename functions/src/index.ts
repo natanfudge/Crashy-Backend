@@ -1,34 +1,65 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import * as express from "express";
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
 //
 
 admin.initializeApp();
 
-const app = express();
-app.post("/api/upload-crash", async (req, res) => {
-    const body = req.body;
+const maxSize = 100_000;
+
+exports.uploadCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
+    if (req.headers["content-encoding"] === "gzip") {
+        res.status(415).send("Don't specify gzip as the content-encoding. This trips up the server.");
+        return;
+    }
+    if (req.headers["content-type"] !== "application/gzip") {
+        res.status(415).send("log must be compressed using gzip");
+        return;
+    }
+
+    const body: Buffer = req.body;
+
+    if (body.length > maxSize) {
+        res.status(413).send("Crash Log too large");
+        return;
+    }
+    console.log(`Writing about ${body.length / 1000}KB of log`);
+    const uploadDate = new Date();
     const writeResult = await admin.firestore().collection("crashes").add({
-        uploadDate: new Date(),
+        uploadDate: uploadDate,
+        lastRead: uploadDate,
         log: body
     });
+    console.log("Wrote crash log with id " + writeResult.id);
 
     res.json({
         crashId: writeResult.id,
         crashUrl: `https://crashy.net/${writeResult.id}`
-    })
+    });
 });
 
-app.get("/api/get-crash", async (req, res) => {
+exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
     const id = req.query["id"];
-    if (!id) return res.status(400).send("No crashlog ID specified")
-    const document = await admin.firestore().doc(`crashes/${id}`).get()
-    const data = document.data();
-    if (!data) return res.status(404).send(`No crashlog with id ${id}`)
+    if (!id) {
+        res.status(400).send("No crashlog ID specified");
+        return;
+    }
+    const document = admin.firestore().doc(`crashes/${id}`);
+    const data = (await document.get()).data();
 
-    return res.send(data["log"])
-})
+    if (!data) {
+        res.status(404).send(`No crashlog with id ${id}`);
+        return;
+    }
 
-exports.widgets = functions.region("europe-west1").https.onRequest(app);
+    res.setHeader("Content-Encoding", "gzip");
+    const log = data["log"];
+    res.send(log);
+
+    //  Update the last read time only after responding because this operation might be slow
+    await document.set({
+        lastRead: new Date(),
+        ...data
+    });
+});

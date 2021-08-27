@@ -31,5 +31,9 @@ module.exports = {
     "indent": 0,
     "no-unused-vars": 1,
     "comma-dangle": 0,
+    "no-trailing-spaces": 0,
+    "padded-blocks": 0,
+    "spaced-comment": 0,
+    "eol-last": 0
   },
 };
