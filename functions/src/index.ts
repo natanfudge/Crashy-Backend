@@ -40,11 +40,13 @@ exports.uploadCrash = functions.region("europe-west1").https.onRequest(async (re
 });
 
 exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
-    const id = req.query["id"];
-    if (!id) {
+    if (!req.url || req.url === "") {
         res.status(400).send("No crashlog ID specified");
         return;
     }
+
+    const id = req.url.slice(1);
+
     const document = admin.firestore().doc(`crashes/${id}`);
     const data = (await document.get()).data();
 
@@ -54,6 +56,9 @@ exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, 
     }
 
     res.setHeader("Content-Encoding", "gzip");
+    res.setHeader("Last-Modified", data["uploadDate"].toDate().toUTCString());
+    res.setHeader("Cache-Control", "public,max-age=604800");
+
     const log = data["log"];
     res.send(log);
 
