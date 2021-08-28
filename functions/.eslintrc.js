@@ -34,6 +34,10 @@ module.exports = {
     "no-trailing-spaces": 0,
     "padded-blocks": 0,
     "spaced-comment": 0,
-    "eol-last": 0
+    "eol-last": 0,
+    "require-jsdoc": 0,
+    "linebreak-style": 0,
+    "valid-jsdoc": 0,
+    "no-non-null-assertion": 0
   },
 };

@@ -1,5 +1,12 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as corsPackage from "cors";
+import {parseCrashReportRich} from "./validation/CrashReportEnricher";
+import * as Zlib from "zlib";
+// cors.e
+// import corsPackage from "cors";
+//
+// const cors = corsPackage({origin: true});
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
 //
@@ -8,7 +15,35 @@ admin.initializeApp();
 
 const maxSize = 100_000;
 
+const cors = corsPackage({origin: true});
+
 exports.uploadCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
+    cors(req, res, () => uploadCrash(req, res));
+});
+
+exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
+    cors(req, res, async () => await getCrash(req, res));
+});
+
+async function getCrashValidationErrors(crash: Buffer): Promise<Error | undefined> {
+    return new Promise((resolve) => {
+        Zlib.unzip(crash, (err, unzipped) => {
+            if (err !== null) {
+                resolve(err);
+                return;
+            }
+
+            try {
+                parseCrashReportRich(unzipped.toString("utf8"));
+            } catch (e) {
+                resolve(e);
+            }
+            resolve(undefined);
+        });
+    });
+}
+
+async function uploadCrash(req: functions.Request, res: functions.Response) {
     if (req.headers["content-encoding"] === "gzip") {
         res.status(415).send("Don't specify gzip as the content-encoding. This trips up the server.");
         return;
@@ -24,6 +59,12 @@ exports.uploadCrash = functions.region("europe-west1").https.onRequest(async (re
         res.status(413).send("Crash Log too large");
         return;
     }
+
+    const error = await getCrashValidationErrors(body);
+    if (error) {
+        res.status(400).send("Could not parse crash log. Error message: " + error.message);
+    }
+
     console.log(`Writing about ${body.length / 1000}KB of log`);
     const uploadDate = new Date();
     const writeResult = await admin.firestore().collection("crashes").add({
@@ -37,10 +78,10 @@ exports.uploadCrash = functions.region("europe-west1").https.onRequest(async (re
         crashId: writeResult.id,
         crashUrl: `https://crashy.net/${writeResult.id}`
     });
-});
+}
 
-exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, res) => {
-    if (!req.url || req.url === "") {
+async function getCrash(req: functions.Request, res: functions.Response) {
+    if (!req.url || req.url === "" || req.url === "/") {
         res.status(400).send("No crashlog ID specified");
         return;
     }
@@ -56,8 +97,9 @@ exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, 
     }
 
     res.setHeader("Content-Encoding", "gzip");
+    res.setHeader("Content-Type", "application/gzip");
     res.setHeader("Last-Modified", data["uploadDate"].toDate().toUTCString());
-    res.setHeader("Cache-Control", "public,max-age=604800");
+    res.setHeader("Cache-Control", "public, max-age=604800, immutable");
 
     const log = data["log"];
     res.send(log);
@@ -67,4 +109,4 @@ exports.getCrash = functions.region("europe-west1").https.onRequest(async (req, 
         lastRead: new Date(),
         ...data
     });
-});
+}
